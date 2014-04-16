@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.ComponentModel.Composition.Hosting;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -25,6 +26,8 @@ namespace Microsoft.AspNet.SignalR.Crank
         private static List<PerformanceCounter> _counters;
         private static Dictionary<PerformanceCounter, List<CounterSample>> _samples;
 
+	    private static IConnectionFactory Factory { get; set; } 
+
         static void Main(string[] args)
         {
             var arguments = ParseArguments();
@@ -35,6 +38,8 @@ namespace Microsoft.AspNet.SignalR.Crank
             ThreadPool.SetMinThreads(arguments.NumClients, 2);
 
             TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+
+	        ComposeConnectionFactory();
 
             var connections = new ConcurrentBag<Connection>();
             var endTime = TimeSpan.MaxValue;
@@ -75,6 +80,25 @@ namespace Microsoft.AspNet.SignalR.Crank
 
             Parallel.ForEach(connections, connection => connection.Stop());
         }
+
+		private static void ComposeConnectionFactory()
+		{
+			try
+			{
+				using (var catalog = new DirectoryCatalog(AppDomain.CurrentDomain.BaseDirectory))
+				using (var container = new CompositionContainer(catalog))
+				{
+					var export = container.GetExport<IConnectionFactory>();
+					if (export != null) Factory = export.Value;
+				}
+			}
+			catch (Exception e)
+			{
+				Console.WriteLine(e);
+			}
+
+			if (Factory == null) Factory = new ConnectionFactory();
+		}
 
         private static void Mark(CrankArguments arguments, ulong value, string metric)
         {
@@ -293,7 +317,7 @@ namespace Microsoft.AspNet.SignalR.Crank
             long remaining = batchSize;
             Parallel.For(0, batchSize, options, async i =>
             {
-                var connection = new Connection(url);
+                var connection = Factory.CreateConnection(url);
 
                 if (!_running)
                 {
@@ -416,6 +440,9 @@ namespace Microsoft.AspNet.SignalR.Crank
 
             [CommandLineParameter(Command = "Timeout", Required = false, Default = 300, Description = "Timeout in seconds. Default: 300")]
             public int Timeout { get; set; }
+
+			[CommandLineParameter(Command = "HubName", Required = false, Default = null, Description = "Hub to connect to. If blank, PersistentConnection is used")]
+			public string HubName { get; set; }
         }
 
     }
